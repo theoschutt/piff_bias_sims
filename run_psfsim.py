@@ -23,6 +23,7 @@
 import os
 import numpy as np
 import fitsio
+import galsim
 import pixmappy
 import galsim_extra
 from toFocal import toFocalDegree
@@ -71,7 +72,7 @@ def makeCCDCatalog(catalog, cattype, ccdnum, expnum=None,
 
     return catalog[ccd_obj_mask]
 
-def getCCDCatalogs(catalogs, cattypes, ccdnum, expnum,
+def makeListCCDCatalogs(catalogs, cattypes, ccdnum, expnum,
     min_ra=None, min_dec=None, max_ra=None, max_dec=None):
     """
     Cuts arbitrary number of catalogs to coordinates of a sensor.
@@ -110,7 +111,7 @@ def main(argv):
     config = {}
 
     config['image'] = {
-        'pixel_scale' : 0.263, # DECam arcsec/pixel
+        'pixel_scale' : 0.263, # DECam arcsec/px
         'x_size' : 2048,
         'y_size' : 4096,
         'wcs' : {
@@ -158,7 +159,7 @@ def main(argv):
                 # get CCD RA/DEC limits
                 min_ra, min_dec, max_ra, max_dec = getCCDCorners(ccdnum, telra, teldec)
                 # get input catalogs for the CCD
-                [ccdgalcat, ccdstarcat] = getCCDCatalogs([galcat, starcat],
+                [ccdgalcat, ccdstarcat] = makeListCCDCatalogs([galcat, starcat],
                                               ['radec', 'radec'], ccdnum, expnum,
                                               **(min_ra, min_dec, max_ra, max_dec))
                 # set filenames
@@ -193,7 +194,10 @@ def main(argv):
                     }
                 }
 
-                config['psf'] = {'type' : 'InterpolatedImage'} #TODO: or custom GSObject type?
+                config['psf'] = {
+                    'type' : 'Gaussian',
+                    'sigma' : 1
+                }
                 config['gal'] = {
                     'type' : 'DeVaucouleurs', #TODO: ask about profile type
                     'half_light_radius' : {
@@ -227,13 +231,13 @@ def main(argv):
                         }
                     }
                     'rotate' : {'type' : 'Random'},
-                    'flux' : #TODO: Do flux and norm_flux have to be specified?           
+                    'flux' : #TODO: Do flux and norm_flux both have to be specified?           
                 }
 
                 config['star'] = {
-                    'type': 'DeltaFunction', #TODO: or also InterpolatedImage
-                    'sed': {},#TODO: will need to match catalog star with SED template,
-                    'flux': 1. #TODO: prob from catalog, or do norm_flux in SED?
+                    'type' : 'DeltaFunction', #TODO: or also InterpolatedImage
+                    'sed' : {},#TODO: will need to match catalog star with SED template,
+                    'flux' : 1. #TODO: prob from catalog, or do norm_flux in SED?
                 }
 
                 config['output'] = {
