@@ -27,6 +27,7 @@ import galsim
 import pixmappy
 import galsim_extra
 from toFocal import toFocalDegree
+import two_catalog_scene
 
 def getCCDCorners(ccdnum, telra, teldec):
     """
@@ -70,7 +71,7 @@ def makeCCDCatalog(catalog, cattype, ccdnum, expnum=None,
         print('Invalid cattype: ',cattype)
         exit
 
-    return catalog[ccd_obj_mask]
+    return catalog[ccd_obj_mask] #and length
 
 def makeListCCDCatalogs(catalogs, cattypes, ccdnum, expnum,
     min_ra=None, min_dec=None, max_ra=None, max_dec=None):
@@ -128,10 +129,9 @@ def main(argv):
     }
 
     config['stamp'] = {
-        'type' : 'MixedScene',
-        'draw_method' : 'phot',
-        'objects' : {'gal' : 0.8, 'star' : 0.2}, #TODO: necessary with gal/star catalogs?
-    }    
+        'type' : 'TwoCatalogScene',
+        'draw_method' : 'phot'
+    }   
 
     config['output']['dir'] = 'output'
 
@@ -144,12 +144,10 @@ def main(argv):
         teldec = exposure['TELDEC']
 
         # set exposure-specfic config values
-        config['image'] = {
-            'wcs': {'exp' : expnum},
-            'bandpass' : {
-                'file_name' : 'decam_bandpass_%s.dat'%band,
-                'wave_type': 'angstrom'
-            }
+        config['image']['wcs']['exp'] = expnum
+        config['image']['bandpass'] = {
+            'file_name' : 'decam_bandpass_%s.dat'%band,
+            'wave_type': 'angstrom'
         }
 
         # loop over CCDs in exposure
@@ -176,47 +174,44 @@ def main(argv):
                 config['input'] = {'catalog' : [{'file_name' : fn_galcat},
                                                 {'file_name' : fn_starcat}]
                 }
-                config['image'] = {'wcs': {'ccdnum': ccdnum}},
-                config['stamp'] = {
-                    'image_pos' : {
-                        'type' : 'XY',
-                        'x' : {
-                            'type' : 'Catalog', 
-                            'col': 'X',
-                            'num': '$current_obj_type_index'
-                        },
-                        'y' : {
-                            'type' : 'Catalog', 
-                            'col': 'Y',
-                            'num': '$current_obj_type_index'
-                        } #TODO: ask re: image_pos, world_pos, sky_pos and XY vs
+                config['image']['wcs']['ccdnum'] = ccdnum
+                config['image']['nobjects'] = len(ccdgalcat)+len(ccdstarcat)
+                config['stamp']['image_pos'] = {
+                    'type' : 'XY',
+                    'x' : {
+                        'type' : 'Catalog', 
+                        'col': 'X',
+                        'num': '$current_obj_type_index'
+                    },
+                    'y' : {
+                        'type' : 'Catalog', 
+                        'col': 'Y',
+                        'num': '$current_obj_type_index'
+                    } #TODO: ask re: image_pos, world_pos, sky_pos and XY vs
                           # RADec type
-                    }
                 }
 
                 config['psf'] = {
                     'type' : 'Gaussian',
                     'sigma' : 1
                 }
+
                 config['gal'] = {
-                    'type' : 'DeVaucouleurs', #TODO: ask about profile type
+                    'type' : 'Sersic', #TODO: use range of Sersic indices
                     'half_light_radius' : {
                         'type' : 'Catalog',
                         'col' : 'FLUX_RADIUS_%s'%upper(band), #TODO: check if correct column to use
-                        'num' : '$current_obj_type_index'
+                        'num' : 0
                     },
-                    'sed' : {
-                        'file_name' : {
-                            'type' : 'Catalog',
-                            'col' : 'SED_TEMPLATE_ID', #TODO: will need to match to gal SEDs
-                            'num' : '$current_obj_type_index'
-                        },
-                        'wave_type' : 'Ang',
-                        'flux_type' : 'flambda', #TODO: check
-                        'norm_flux' : 1., #TODO: is this necessary?
-                        'norm_bandpass' : '@image.bandpass'
-                    }
-                    'redshift' : 0.,#TODO: is this already baked into the SED matching?
+                    # TODO: write custom SED file parsing class
+                    # 'sed' :{'type': 'SEDLibrary',
+                    #         'g_flux': {'type': 'Catalog',
+                    #                   'col': 'MAG_AUTO_G',
+                    #                   'num': 0
+                    #                   }
+                    #                   # all 4 bands ...
+                    # },
+                    # 'redshift' : 0., # TODO: is this already baked into the SED matching?
                     'ellip' : {
                         'type' : 'G1G2', #Y6 Gold uses reduced shear
                         'g1' : {
@@ -229,20 +224,34 @@ def main(argv):
                             'col' : 'SOF_BDF_G_2',
                             'num' : '$current_obj_type_index'
                         }
+                    },
+                    # 'rotate' : {'type' : 'Random'},
+                    'flux' : {'type': 'Catalog',
+                                      'col': 'MAG_AUTO_%s'%upper(band),
+                                      'num': 0
                     }
-                    'rotate' : {'type' : 'Random'},
-                    'flux' : #TODO: Do flux and norm_flux both have to be specified?           
                 }
 
                 config['star'] = {
-                    'type' : 'DeltaFunction', #TODO: or also InterpolatedImage
-                    'sed' : {},#TODO: will need to match catalog star with SED template,
-                    'flux' : 1. #TODO: prob from catalog, or do norm_flux in SED?
+                    'type' : 'DeltaFunction', # TODO: or also InterpolatedImage (for Aaron's PSFs)
+                    # 'sed' : {}, # TODO: will need to match catalog star with SED template
+                    'flux' : {'template': ':gal.flux'}
                 }
 
                 config['output'] = {
                     'file_name' : 'sim_v%i_%i_c%i_%s_image.fits'%(ver,expnum,ccdnum,band),
                     'psf': {'file_name': 'sim_v%i_%i_c%i_%s_psf.fits'%(ver,expnum,ccdnum,band)}
+                    'truth': {
+                        'file_name': 'sim_v%i_%i_c%i_%s_truth.fits'%(ver,expnum,ccdnum,band),
+                        'columns': {
+                            'obj_type': '$current_obj_type',
+                            'obj_idx_': '$current_index', # TODO: check!!! object's index in it's input catalog
+                            'sersic_n': '$(current_obj_type == "gal") and @gal.n or -999',
+                            'hlr': '$(current_obj_type == "gal") and @gal.half_light_radius or @psf.half_light_radius',
+                            'g1': '$(current_obj_type == "gal") and @gal.shear.g1 or -999',
+                            'g2': '$(current_obj_type == "gal") and @gal.shear.g2 or -999'
+                        }
+                    }
                 }
 
                 # run galsim on this config
